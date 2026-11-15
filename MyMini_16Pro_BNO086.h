@@ -49,7 +49,7 @@ void RobotSetup() {
   loadCalibration();
   if (gyro_Begin()) resetYaw();
 
-  // ตั้งความเร็ว I2C หลังสุด เพราะ myIMU.begin() เรียก Wire.begin() ซ้ำข้างใน
+  // ตั้งความเร็ว I2C ซ้ำหลังเริ่ม IMU (กันไว้ — SparkFun v1.0.6 ไม่ได้เรียก Wire.begin() ซ้ำ)
   Wire.setClock(I2C_CLOCK);
 
   SoundStartup();

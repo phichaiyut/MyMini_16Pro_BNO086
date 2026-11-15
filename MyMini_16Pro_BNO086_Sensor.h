@@ -498,8 +498,32 @@ void printCalibration() {
 // [8] อ่านเซนเซอร์ + แปลงเป็นค่าคาลิเบรต (ReadCalibrate)
 // ======================================================================
 
+// กรองค่าเซนเซอร์ (IIR) ต่อช่อง แบบ MyMINI_16Pro ต้นฉบับ (MUX_SMOOTHING_DIVISOR = 4)
+// 1 = ไม่กรอง (ค่าเริ่มต้น = พฤติกรรมเดิม) | 2, 4 = ลดสัญญาณรบกวน แต่ช้าลง ~divisor เฟรม
+// ไม่มีผลกับการ Calibrate (calibrateMux อ่านค่าดิบจาก readMuxFrame โดยตรง)
+int muxSmooth = 1;
+int32_t smoothFQ8[NUM_SENSORS], smoothBQ8[NUM_SENSORS];
+bool smoothFInit = false, smoothBInit = false;
+
+void SetSensorSmooth(int divisor) {
+  muxSmooth = constrain(divisor, 1, 8);
+  smoothFInit = false;
+  smoothBInit = false;
+}
+
+static int smoothValue(int32_t &q8, uint16_t raw, bool init) {
+  int32_t target = (int32_t)raw << 8;
+  if (!init || muxSmooth <= 1) q8 = target;
+  else q8 += (target - q8) / muxSmooth;
+  return (int)((q8 + 128) >> 8);
+}
+
 void ReadF() {
   readMuxFrame(true, false);
+  for (int ch = 0; ch < NUM_SENSORS; ch++) {
+    rawF[ch] = smoothValue(smoothFQ8[ch], rawF[ch], smoothFInit);
+  }
+  smoothFInit = true;
   for (int i = 0; i < NUM_SENSORS; i++) {
     F[i] = rawF[F_PIN[i]];
   }
@@ -507,9 +531,22 @@ void ReadF() {
 
 void ReadB() {
   readMuxFrame(false, true);
+  for (int ch = 0; ch < NUM_SENSORS; ch++) {
+    rawB[ch] = smoothValue(smoothBQ8[ch], rawB[ch], smoothBInit);
+  }
+  smoothBInit = true;
   for (int i = 0; i < NUM_SENSORS; i++) {
     B[i] = rawB[B_PIN[i]];
   }
+}
+
+// map() ของ Arduino หารด้วย (max - min) → ถ้ายังไม่ Calibrate (min = max = 0) จะหารศูนย์
+// บน RP2350 ได้ผลเป็น 0 → ทุกช่องกลายเป็น 1000 (เห็นเส้นดำเต็มแถว) หุ่นจะไม่เกาะเส้นเลย
+// ฟังก์ชันนี้คืน 0 (พื้นขาว) แทนเมื่อค่า Calibrate ใช้ไม่ได้
+static int16_t calibMap(int v, int lo, int hi) {
+  if (hi <= lo) return 0;
+  v = constrain(v, lo, hi);
+  return LineColor == 0 ? map(v, lo, hi, 1000, 0) : map(v, lo, hi, 0, 1000);
 }
 
 // อ่าน ADS1115 ไม่ได้ → ใช้ค่าครั้งก่อน
@@ -543,12 +580,7 @@ void clampSensorValueB(int x, int y) {
 void ReadCalibrateF() {
   ReadF();
   for (int i = 0; i < NUM_SENSORS; i++) {
-    F[i] = constrain(F[i], minValueF[F_PIN[i]], maxValueF[F_PIN[i]]);
-    int16_t x;
-    if (LineColor == 0)
-      x = map(F[i], minValueF[F_PIN[i]], maxValueF[F_PIN[i]], 1000, 0);
-    else
-      x = map(F[i], minValueF[F_PIN[i]], maxValueF[F_PIN[i]], 0, 1000);
+    int16_t x = calibMap(F[i], minValueF[F_PIN[i]], maxValueF[F_PIN[i]]);
     if (x < FRONT_MIN) x = 0;
     if (x > FRONT_MAX) x = 1000;
     F[i] = x;
@@ -559,12 +591,7 @@ void ReadCalibrateC() {
   ReadC();
 
   for (int i = 0; i < 2; i++) {
-    C[i] = constrain(C[i], minValueC[i], maxValueC[i]);
-    int16_t x;
-    if (LineColor == 0)
-      x = map(C[i], minValueC[i], maxValueC[i], 1000, 0);
-    else
-      x = map(C[i], minValueC[i], maxValueC[i], 0, 1000);
+    int16_t x = calibMap(C[i], minValueC[i], maxValueC[i]);
     if (x < CENTER_MIN) x = 0;
     if (x > CENTER_MAX) x = 1000;
     C[i] = x;
@@ -575,12 +602,7 @@ void ReadCalibrateB() {
   ReadB();
 
   for (int i = 0; i < NUM_SENSORS; i++) {
-    B[i] = constrain(B[i], minValueB[B_PIN[i]], maxValueB[B_PIN[i]]);
-    int16_t x;
-    if (LineColor == 0)
-      x = map(B[i], minValueB[B_PIN[i]], maxValueB[B_PIN[i]], 1000, 0);
-    else
-      x = map(B[i], minValueB[B_PIN[i]], maxValueB[B_PIN[i]], 0, 1000);
+    int16_t x = calibMap(B[i], minValueB[B_PIN[i]], maxValueB[B_PIN[i]]);
     if (x < BACK_MIN) x = 0;
     if (x > BACK_MAX) x = 1000;
     B[i] = x;

@@ -344,6 +344,9 @@ void SetDelayBreak(int ch, int delay_f, int delay_b) {
 
 int LastError_F, LastError_B;            // ค่า error ก่อนหน้าของ PIDF / PIDB
 int LastError_F_none, LastError_B_none;  // ค่า error ก่อนหน้าของ PID แบบ _none
+// สถานะ D-term ของ PIDF / PIDB (กรอง + เริ่มรอบแรกโดยไม่กระชาก) — ใช้ใน PID.h
+float FilteredD_F = 0, FilteredD_B = 0;
+bool PidFreshF = true, PidFreshB = true;
 void resetGyroRunError();                // อยู่ใน Gyro.h: รีเซ็ต previous_errorG / previous_errorGB
 
 // เลือกชุดค่าความเร็ว/PID ตามช่วงของ BaseSpeed (ปัดขึ้นเป็นสิบ เช่น 35 ใช้ชุดของ 40)
@@ -364,6 +367,10 @@ void InitialSpeed() {
   LastError_B = 0;
   LastError_F_none = 0;
   LastError_B_none = 0;
+  FilteredD_F = 0;
+  FilteredD_B = 0;
+  PidFreshF = true;  // รอบแรกของ PIDF / PIDB ไม่ใช้ D (กัน D กระชากตอนออกตัว)
+  PidFreshB = true;
   resetGyroRunError();  // previous_errorG / previous_errorGB = error ปัจจุบัน
 }
 

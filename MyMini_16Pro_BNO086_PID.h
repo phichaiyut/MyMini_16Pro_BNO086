@@ -90,6 +90,17 @@ void SetPIDDeadBand(int db) {
 // spinl()/spinr() หยุดเร็วเกินไปโดยยังไม่พ้นเส้นเดิม)
 int SpinDebounceCount = 5;
 
+// ตัวกรอง D-term (low-pass) แบบเดียวกับ MyMINI_16Pro ต้นฉบับ (DERIVATIVE_FILTER_ALPHA = 0.70)
+// 0 = ไม่กรอง (พฤติกรรมเดิม) | 0.5-0.8 = กรองมากขึ้น ลดอาการล้อสั่น/กระชากจากสัญญาณรบกวน
+float PID_DerivAlpha = 0.70f;
+
+void SetPIDDerivFilter(float alpha) {
+  PID_DerivAlpha = constrain(alpha, 0.0f, 0.95f);
+}
+
+// สถานะ "เห็นเส้น" ของการอ่านตำแหน่งครั้งล่าสุด (readPositionF / readPositionB ตั้งค่า)
+bool lineOnlineF = false, lineOnlineB = false;
+
 // ======================================================================
 // [2] ฟังก์ชันตั้งค่า (Config)
 // ======================================================================
@@ -290,6 +301,7 @@ int readPositionF(int Track, int noise) {
       sum += values;
     }
   }
+  lineOnlineF = online;
   if (!online) {
     if (last_value < (NUM_SENSORS - 1) * 1000 / 2)
       return setsensortracklineL * 1000;
@@ -316,6 +328,7 @@ int readPositionB(int Track, int noise) {
       sum += values;
     }
   }
+  lineOnlineB = online;
   if (!online) {
     if (last_value < (NUM_SENSORS - 1) * 1000 / 2)
       return setsensortracklineL * 1000;
@@ -414,12 +427,32 @@ void ClampPIDPower(float &LeftPower, float &RightPower, int SpeedL, int SpeedR) 
   }
 }
 
+// D-term ที่ปลอดภัย (ใช้ร่วมกัน PIDF / PIDB):
+//  - รอบแรกหลัง InitialSpeed() → ไม่ใช้ D (เดิม LastError = 0 ทำให้ D กระชากเท่ากับ Kd * Error)
+//  - รอบที่สถานะเห็นเส้นเปลี่ยน (หลุดเส้น / กลับเจอเส้น) → ไม่ใช้ D
+//    เพราะ readPosition กระโดดไป 0 / 15000 ทันที ΔError ~ 6000 × Kd 0.26 = ~1600 → มอเตอร์เต็มพิกัด
+//  - กรอง low-pass (PID_DerivAlpha) แบบ MyMINI_16Pro ต้นฉบับ
+static float safeDerivative(float Error, int &LastError, float &FilteredD,
+                            bool &fresh, bool online, bool &lastOnline) {
+  float rawD = Error - LastError;
+  if (fresh || online != lastOnline) {
+    rawD = 0;
+    FilteredD = 0;
+  }
+  fresh = false;
+  lastOnline = online;
+  LastError = Error;
+  FilteredD = PID_DerivAlpha * FilteredD + (1.0f - PID_DerivAlpha) * rawD;
+  return FilteredD;
+}
+
 void PIDF(int SpeedL, int SpeedR, float Kp, float Kd) {
+  static bool lastOnline = true;
   float Pos = readPositionF(200, 50);
   float Error = Pos - set_position;
   if (fabs(Error) < PID_DeadBand) Error = 0;
-  float PID_Value = (Kp * Error) + (Kd * (Error - LastError_F));
-  LastError_F = Error;
+  float D = safeDerivative(Error, LastError_F, FilteredD_F, PidFreshF, lineOnlineF, lastOnline);
+  float PID_Value = (Kp * Error) + (Kd * D);
   float LeftPower = SpeedL + PID_Value;
   float RightPower = SpeedR - PID_Value;
   ClampPIDPower(LeftPower, RightPower, SpeedL, SpeedR);
@@ -427,11 +460,12 @@ void PIDF(int SpeedL, int SpeedR, float Kp, float Kd) {
 }
 
 void PIDB(int SpeedL, int SpeedR, float Kp, float Kd) {
+  static bool lastOnline = true;
   float Pos = readPositionB(200, 50);
   float Error = Pos - set_position;
   if (fabs(Error) < PID_DeadBand) Error = 0;
-  float PID_Value = (Kp * Error) + (Kd * (Error - LastError_B));
-  LastError_B = Error;
+  float D = safeDerivative(Error, LastError_B, FilteredD_B, PidFreshB, lineOnlineB, lastOnline);
+  float PID_Value = (Kp * Error) + (Kd * D);
   float LeftPower = SpeedL + PID_Value;
   float RightPower = SpeedR - PID_Value;
   ClampPIDPower(LeftPower, RightPower, SpeedL, SpeedR);
@@ -1669,7 +1703,7 @@ void ff(int Speed, float Kp, float Kd, char select) {
   while (1) {
     PIDF(LeftBaseSpeed, RightBaseSpeed, Kp, Kd);
     ReadCalibrateF();
-    if (F[3] > Ref || F[12] > Ref || (F[4] > Ref && F[11] > Ref)) {
+    if (F[0] > Ref || F[15] > Ref){
       break;
     }
   }
@@ -1692,7 +1726,7 @@ void bb(int Speed, float Kp, float Kd, char select) {
   while (1) {
     PIDB(BackLeftBaseSpeed, BackRightBaseSpeed, Kp, Kd);
     ReadCalibrateB();
-    if (B[3] > Ref || B[12] > Ref || (B[4] > Ref && B[11] > Ref)) {
+    if (B[0] > Ref || B[15] > Ref){
       break;
     }
   }
@@ -1736,7 +1770,7 @@ void ffc(int Speed, float Kp, float Kd, char select) {
   while (1) {
     PIDF(LeftBaseSpeed, RightBaseSpeed, Kp, Kd);
     ReadCalibrateF();
-    if ((F[5] >= Ref && F[10] >= Ref) || (F[4] >= Ref && F[11] >= Ref) || (F[3] >= Ref && F[12] >= Ref) || (F[5] >= Ref && F[6] >= Ref && F[9] >= Ref && F[10] >= Ref)) break;
+    if (F[0] >= Ref && F[15] >= Ref) break;
   }
   TrackSelectF(Speed, select);
 }
@@ -1778,7 +1812,7 @@ void bbc(int Speed, float Kp, float Kd, char select) {
   while (1) {
     PIDB(BackLeftBaseSpeed, BackRightBaseSpeed, Kp, Kd);
     ReadCalibrateB();
-    if ((B[5] >= Ref && B[10] >= Ref) || (B[4] >= Ref && B[11] >= Ref) || (B[3] >= Ref && B[12] >= Ref) || (B[5] >= Ref && B[6] >= Ref && B[9] >= Ref && B[10] >= Ref)) break;
+    if (B[0] >= Ref && B[15] >= Ref)  break;
   }
   TrackSelectB(Speed, select);
 }
@@ -2607,6 +2641,44 @@ void SerialPositionFB() {
     Serial.println(posB);
     delay(100);
   }
+}
+
+// วัดเวลาต่อรอบของลูปเดินตามเส้น (อ่านเซนเซอร์หน้า + คำนวณตำแหน่ง + Motor) โดยล้อไม่หมุน
+// พิมพ์ avg / max (us) ทุก 1 วินาที — max ที่สูงกว่า avg มาก = มีการหน่วง (เช่น อ่านแบต ADS1115 ผ่าน I2C)
+void SerialLoopTimeF() {
+  while (1) {
+    unsigned long sum = 0, maxUs = 0, n = 0;
+    unsigned long start = millis();
+    unsigned long prev = micros();
+    while (millis() - start < 1000) {
+      int pos = readPositionF(200, 50);
+      (void)pos;
+      Motor(0, 0);  // ปล่อยล้อ แต่ยังผ่าน bat_control() เหมือนตอนวิ่งจริง
+      unsigned long now = micros();
+      unsigned long dt = now - prev;
+      prev = now;
+      sum += dt;
+      if (dt > maxUs) maxUs = dt;
+      n++;
+    }
+    Serial.printf("loop avg = %lu us  max = %lu us  (%lu รอบ/วินาที)  online=%d\n",
+                  n ? sum / n : 0, maxUs, n, lineOnlineF);
+  }
+}
+
+// ทดสอบทิศล้อ (ยกล้อลอยก่อน!): ซ้ายเดินหน้า 1 วิ → ขวาเดินหน้า 1 วิ → หยุด
+// ล้อซ้ายจริงต้องหมุน "เดินหน้า" ก่อน ถ้าผิดให้แก้ set_MotorInvert() หรือสลับสายมอเตอร์
+void TestMotorDirection() {
+  Serial.println("ล้อซ้าย เดินหน้า 30%");
+  Motor(30, 0);
+  delay(1000);
+  MotorStop();
+  delay(500);
+  Serial.println("ล้อขวา เดินหน้า 30%");
+  Motor(0, 30);
+  delay(1000);
+  MotorStop();
+  Serial.println("จบการทดสอบ");
 }
 
 // ======================================================================

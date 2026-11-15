@@ -39,7 +39,12 @@ bool imuReady = false;  // true = เจอ BNO086 (ไม่เจอ → ค�
 float yawOffset = 0;
 float lastYaw = 0;
 float yawgyro = 0;  // มุมสะสมไม่ตัดรอบ (เลี้ยวขวา 2 รอบ = 720)
-const int YAW_SIGN = -1;
+// ทิศของมุม yaw ขึ้นกับการติดตั้ง BNO086 บนหุ่น: หมุนหุ่นไปทางขวาแล้ว gyroZ() ต้องเป็นบวก
+// ถ้าเป็นลบ ให้ใส่ #define MYMINI_YAW_SIGN 1 ไว้ก่อน #include <MyMini_16Pro_BNO086.h> (ตรวจด้วย examples/GyroTest)
+#ifndef MYMINI_YAW_SIGN
+#define MYMINI_YAW_SIGN -1
+#endif
+const int YAW_SIGN = MYMINI_YAW_SIGN;
 
 // ---------- ค่าปรับไจโร: หมุนตัว (Spin) ----------
 
@@ -92,18 +97,97 @@ int gyro_BounceMs_turn_b = 5;
 // [2] เริ่มต้น / อ่านมุม IMU (gyro_Begin / yaw / reset)
 // ======================================================================
 
+// ---------- ชนิดรายงานมุม / ความทนทานของ IMU ----------
+// 0 = Game Rotation Vector (ไม่ใช้เข็มทิศ → ไม่โดนสนามแม่เหล็กมอเตอร์ดึงมุม, แนะนำสำหรับหุ่นยนต์)
+// 1 = Rotation Vector (ใช้เข็มทิศ แบบเดิม) — ตั้งได้โดย #define MYMINI_BNO_USE_MAG 1 ก่อน #include
+#ifndef MYMINI_BNO_USE_MAG
+#define MYMINI_BNO_USE_MAG 0
+#endif
+#if MYMINI_BNO_USE_MAG
+#define IMU_REPORT_ID SENSOR_REPORTID_ROTATION_VECTOR
+#else
+#define IMU_REPORT_ID SENSOR_REPORTID_GAME_ROTATION_VECTOR
+#endif
+#define IMU_REPORT_MS 5    // ขอข้อมูลมุมทุก 5 ms (200 Hz)
+#define IMU_STALE_MS 300   // ไม่มีค่ามุมใหม่นานกว่านี้ระหว่างหมุน = ไจโรค้าง → หยุดคำสั่ง
+
+unsigned long gyro_TurnTimeoutMs = 3000;  // เวลาสูงสุดของคำสั่งหมุน/เลี้ยวด้วยไจโร (ms)
+unsigned long gyro_DirTimeoutMs = 5000;   // เวลาสูงสุดของ ffdir / bbdir (ms)
+unsigned long lastImuEventMs = 0;         // เวลาที่ได้ค่ามุมใหม่ล่าสุด
+uint16_t imuResetCount = 0;               // จำนวนครั้งที่ BNO08x รีเซ็ตตัวเองระหว่างทำงาน
+bool imuSessionOpen = false;              // มี SH2 session ค้างจาก begin() ครั้งก่อน
+
+void set_gyro_turn_timeout(unsigned long ms) {
+  gyro_TurnTimeoutMs = ms;
+}
+void set_gyro_dir_timeout(unsigned long ms) {
+  gyro_DirTimeoutMs = ms;
+}
+
+bool imuEnableReports() {
+#if MYMINI_BNO_USE_MAG
+  return myIMU.enableRotationVector(IMU_REPORT_MS);
+#else
+  return myIMU.enableGameRotationVector(IMU_REPORT_MS);
+#endif
+}
+
+// BNO08x รีเซ็ตตัวเองได้ (ไฟตกตอนมอเตอร์กระชาก ฯลฯ) หลังรีเซ็ตจะหยุดส่งมุมจนกว่าจะเปิดรายงานใหม่
+void imuCheckReset() {
+  if (myIMU.wasReset()) {
+    imuResetCount++;
+    imuEnableReports();
+  }
+}
+
+bool waitForRotVec(uint32_t timeout_ms = 200) {
+  if (!imuReady) return false;
+  uint32_t t0 = millis();
+  while (millis() - t0 < timeout_ms) {
+    bool got = myIMU.getSensorEvent();
+    imuCheckReset();
+    if (got && myIMU.getSensorEventID() == IMU_REPORT_ID) {
+      lastImuEventMs = millis();
+      return true;
+    }
+    delay(1);
+  }
+  return false;
+}
+
 // ลองหา BNO08x ที่ 0x4A และ 0x4B ซ้ำได้ไม่เกิน timeoutMs ถ้าไม่เจอให้ทำงานต่อโดยไม่มี gyro
+// สำเร็จ = เจออุปกรณ์ + เปิดรายงานได้ + ได้ค่ามุมจริงอย่างน้อย 1 ครั้ง
 bool gyro_Begin(unsigned long timeoutMs = 10000) {
   const uint8_t addresses[] = { 0x4A, 0x4B };
   imuReady = false;
   unsigned long start = millis();
   while (!imuReady && millis() - start < timeoutMs) {
     for (uint8_t addr : addresses) {
-      if (probeI2C(addr) && myIMU.begin(addr, Wire, -1, -1)) {
-        imuReady = true;
-        Serial.printf("BNO08x found at 0x%02X!\n", addr);
-        break;
+      if (!probeI2C(addr)) continue;
+
+      // ไลบรารี SparkFun มี SHTP ได้แค่ 1 instance และ begin() ที่ล้มเหลวไม่คืน instance
+      // ถ้าไม่ sh2_close() ก่อน การลองใหม่ทุกครั้งจะล้มเหลวจนกว่าจะถอดไฟ
+      if (imuSessionOpen) {
+        sh2_close();
+        imuSessionOpen = false;
       }
+      imuSessionOpen = true;  // probe ผ่าน → begin() จะเปิด SH2 session
+      if (!myIMU.begin(addr, Wire, -1, -1)) {
+        Serial.printf("BNO08x at 0x%02X: begin failed, retry\n", addr);
+        continue;
+      }
+      if (!imuEnableReports()) {
+        Serial.printf("BNO08x at 0x%02X: enable report failed, retry\n", addr);
+        continue;
+      }
+      imuReady = true;
+      if (!waitForRotVec(500)) {
+        imuReady = false;
+        Serial.printf("BNO08x at 0x%02X: no angle data, retry\n", addr);
+        continue;
+      }
+      Serial.printf("BNO08x found at 0x%02X! (%s)\n", addr, MYMINI_BNO_USE_MAG ? "Rotation Vector" : "Game Rotation Vector");
+      break;
     }
     if (!imuReady) delay(100);
   }
@@ -117,28 +201,32 @@ bool gyro_Begin(unsigned long timeoutMs = 10000) {
     return false;
   }
 
-  myIMU.enableRotationVector(5);  // ตั้งค่าให้ BNO08x ส่งข้อมูล rotation vector ทุก 5ms (200Hz)
-  // myIMU.begin() เรียก Wire.begin() ซ้ำข้างใน → ตั้งความเร็วบัสกลับเป็น 100 kHz
+  // กันไว้: บางเวอร์ชันของไลบรารีอาจเปลี่ยนความเร็วบัส → ตั้งกลับเป็น 100 kHz
   Wire.setClock(I2C_CLOCK);
   return true;
+}
+
+// true = ต้องยกเลิกคำสั่งหมุน: ไม่มีไจโร / ไจโรไม่ส่งค่ามุมใหม่ / เกินเวลาที่กำหนด
+// (กันหุ่นหมุนไม่หยุดเมื่อมุมค้าง ซึ่งเดิมทำให้บอร์ดเหมือนค้าง)
+bool gyroAbort(unsigned long startMs, unsigned long timeoutMs) {
+  if (!imuReady) return true;
+  unsigned long now = millis();
+  if (now - startMs > timeoutMs) {
+    Serial.println("gyro: timeout");
+    return true;
+  }
+  unsigned long ref = (lastImuEventMs > startMs) ? lastImuEventMs : startMs;
+  if (now - ref > IMU_STALE_MS) {
+    Serial.println("gyro: no data (stalled)");
+    return true;
+  }
+  return false;
 }
 
 float wrap180(float a) {
   while (a > 180.0f) a -= 360.0f;
   while (a < -180.0f) a += 360.0f;
   return a;
-}
-
-bool waitForRotVec(uint32_t timeout_ms = 200) {
-  if (!imuReady) return false;
-  uint32_t t0 = millis();
-  while (millis() - t0 < timeout_ms) {
-    if (myIMU.getSensorEvent() && myIMU.getSensorEventID() == SENSOR_REPORTID_ROTATION_VECTOR) {
-      return true;
-    }
-    delay(1);
-  }
-  return false;
 }
 
 float quatToYawDeg() {
@@ -168,8 +256,11 @@ int updateYawFromEvent() {
 
 int angleRead() {
   if (!imuReady) return lastYaw;
-  if (!myIMU.getSensorEvent()) return lastYaw;
-  if (myIMU.getSensorEventID() != SENSOR_REPORTID_ROTATION_VECTOR) return lastYaw;
+  bool got = myIMU.getSensorEvent();
+  imuCheckReset();
+  if (!got) return lastYaw;
+  if (myIMU.getSensorEventID() != IMU_REPORT_ID) return lastYaw;
+  lastImuEventMs = millis();
   return updateYawFromEvent();
 }
 
@@ -422,7 +513,12 @@ void spindegree(int Speed, int relative_degree) {
   if (target_degree < -180.0f) target_degree += 360.0f;
   current_degree = target_degree;
   int spin_dir = 0;  // ทิศคำสั่งล่าสุด: 1 = หมุนขวา, -1 = หมุนซ้าย, 0 = ไม่ได้หมุน
+  unsigned long t0 = millis();
   while (1) {
+    if (gyroAbort(t0, gyro_TurnTimeoutMs)) {
+      MotorStop();
+      return;
+    }
     float current_angle = gyroZ();
     float error = target_degree - current_angle;
 
@@ -470,8 +566,13 @@ void turndegree(int Speed, int relative_degree) {
   if (target_degree < -180.0f) target_degree += 360.0f;
   current_degree = target_degree;
   int turn_dir = 0;  // ทิศคำสั่งล่าสุด: 1 = เลี้ยวขวา (ล้อซ้ายเดิน), -1 = เลี้ยวซ้าย (ล้อขวาเดิน), 0 = ไม่ได้เลี้ยว
+  unsigned long t0 = millis();
 
   while (1) {
+    if (gyroAbort(t0, gyro_TurnTimeoutMs)) {
+      MotorStop();
+      return;
+    }
     float current_angle = gyroZ();
     float error = target_degree - current_angle;
 
@@ -525,8 +626,13 @@ void turndegreeb(int Speed, int relative_degree) {
   if (target_degree < -180.0f) target_degree += 360.0f;
   current_degree = target_degree;
   int turn_dir = 0;  // ทิศคำสั่งล่าสุด: 1 = ล้อขวาถอย, -1 = ล้อซ้ายถอย, 0 = ไม่ได้เลี้ยว
+  unsigned long t0 = millis();
 
   while (1) {
+    if (gyroAbort(t0, gyro_TurnTimeoutMs)) {
+      MotorStop();
+      return;
+    }
     float current_angle = gyroZ();
     float error = target_degree - current_angle;
 
@@ -577,8 +683,13 @@ void rotatedegree(int SpeedL, int SpeedR, int relative_degree, float kp, float k
   if (target_degree > 180.0f) target_degree -= 360.0f;
   if (target_degree < -180.0f) target_degree += 360.0f;
   current_degree = target_degree;
+  unsigned long t0 = millis();
 
   while (1) {
+    if (gyroAbort(t0, gyro_TurnTimeoutMs)) {
+      MotorStop();
+      return;
+    }
     float current_angle = gyroZ();
     float error = target_degree - current_angle;
 
@@ -613,8 +724,13 @@ void turndegree_none(int Speed, int relative_degree) {
   if (target_degree > 180.0f) target_degree -= 360.0f;
   if (target_degree < -180.0f) target_degree += 360.0f;
   current_degree = target_degree;
+  unsigned long t0 = millis();
 
   while (1) {
+    if (gyroAbort(t0, gyro_TurnTimeoutMs)) {
+      MotorStop();
+      return;
+    }
     float current_angle = gyroZ();
     float error = target_degree - current_angle;
 
@@ -644,8 +760,13 @@ void turndegreeb_none(int Speed, int relative_degree) {
   if (target_degree > 180.0f) target_degree -= 360.0f;
   if (target_degree < -180.0f) target_degree += 360.0f;
   current_degree = target_degree;
+  unsigned long t0 = millis();
 
   while (1) {
+    if (gyroAbort(t0, gyro_TurnTimeoutMs)) {
+      MotorStop();
+      return;
+    }
     float current_angle = gyroZ();
     float error = target_degree - current_angle;
 
@@ -1807,7 +1928,14 @@ static void ffdir_pid(int Speed, int direction, float Kp, float Kd) {
   if (Kp < 0) Kp = PID_KP_Front;
   if (Kd < 0) Kd = PID_KD_Front;
   float previous_error = wrap180(fmodf((float)direction, 360.0f) - angleReadFresh());
-  while (!reachedDirection(direction, previous_error)) PIDF(LeftBaseSpeed, RightBaseSpeed, Kp, Kd);
+  unsigned long t0 = millis();
+  while (!reachedDirection(direction, previous_error)) {
+    if (gyroAbort(t0, gyro_DirTimeoutMs)) {
+      MotorStop();
+      return;
+    }
+    PIDF(LeftBaseSpeed, RightBaseSpeed, Kp, Kd);
+  }
 }
 
 // Kp / Kd ติดลบ = ใช้ค่าจากตารางความเร็ว (PID_KP_Back / PID_KD_Back)
@@ -1817,7 +1945,14 @@ static void bbdir_pid(int Speed, int direction, float Kp, float Kd) {
   if (Kp < 0) Kp = PID_KP_Back;
   if (Kd < 0) Kd = PID_KD_Back;
   float previous_error = wrap180(fmodf((float)direction, 360.0f) - angleReadFresh());
-  while (!reachedDirection(direction, previous_error)) PIDB(BackLeftBaseSpeed, BackRightBaseSpeed, Kp, Kd);
+  unsigned long t0 = millis();
+  while (!reachedDirection(direction, previous_error)) {
+    if (gyroAbort(t0, gyro_DirTimeoutMs)) {
+      MotorStop();
+      return;
+    }
+    PIDB(BackLeftBaseSpeed, BackRightBaseSpeed, Kp, Kd);
+  }
 }
 
 void ffdir(int Speed, int direction) {
