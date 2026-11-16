@@ -56,7 +56,18 @@ bool MOTOR_R_INVERT = false;
 
 // สถานะภายในของไดรเวอร์
 bool drvAsleepL = true, drvAsleepR = true;
+int drvModeL = WHEEL_COAST, drvModeR = WHEEL_COAST;
 int tbModeL = WHEEL_COAST, tbModeR = WHEEL_COAST;
+bool robotStopped = true;  // true = ล้อทั้งสองหยุด (เบรก/ปล่อย) — ใช้ตัดสินว่าต้อง soft-start ไหม
+
+// Soft-start ตอนออกตัว (แบบ lineStartupFactor ของ MyMINI_16Pro: 200 ms, ไม่ ramp ถ้าต่ำกว่า 40)
+// มอเตอร์ coreless 12.4 V กระแสล็อกล้อ ~5 A/ตัว: สั่ง 80-100 จากหยุดนิ่งทันที = กระแสกระชาก
+// เกินขีด OCP ของ DRV8874 / ทำแบตตก → ไดรเวอร์ตัด ล้อไม่หมุน
+#define SOFT_START_MIN_SPEED 40
+int softStartMs = 200;  // 0 = ปิด
+bool softStartActive = false;
+unsigned long softStartBegin = 0;
+int softStartBase = 100;
 
 void MotorCoast();
 
@@ -80,6 +91,8 @@ void MotorBegin() {
     analogWrite(DRV_R_EN, 0);
     drvAsleepL = true;
     drvAsleepR = true;
+    drvModeL = WHEEL_COAST;
+    drvModeR = WHEEL_COAST;
     delay(1);  // tSLEEP สูงสุด 1 ms
   } else {
     pinMode(TB_L_PWM, OUTPUT);
@@ -161,14 +174,25 @@ void bat_control() {
 // [3] เขียนขาไดรเวอร์ทีละล้อ (DRV8874 / TB6612FNG)
 // ======================================================================
 
-void writeWheelDRV(uint8_t en, uint8_t ph, uint8_t slp, bool &asleep, int mode, int pwm) {
+void writeWheelDRV(uint8_t en, uint8_t ph, uint8_t slp, bool &asleep, int &lastMode, int mode, int pwm) {
   if (mode == WHEEL_COAST) {
     analogWrite(en, 0);
     if (!asleep) {
       digitalWrite(slp, LOW);  // nSLEEP LOW = ทั้งสองขาออก Hi-Z
       asleep = true;
     }
+    lastMode = WHEEL_COAST;
     return;
+  }
+  bool driving = mode == WHEEL_FWD || mode == WHEEL_REV;
+  bool wasDriving = lastMode == WHEEL_FWD || lastMode == WHEEL_REV;
+  if (driving && !wasDriving && !asleep) {
+    // ออกตัวจากเบรก: สั่ง sleep → wake หนึ่งรอบเพื่อล้าง fault (OCP) ที่อาจค้าง
+    // จากการออกตัวแรง ๆ ครั้งก่อน — ต้นฉบับ MyMINI_16Pro ทำแบบนี้ทุกครั้งที่สั่ง 0
+    analogWrite(en, 0);
+    digitalWrite(slp, LOW);
+    delayMicroseconds(50);
+    asleep = true;
   }
   if (asleep) {
     analogWrite(en, 0);
@@ -178,10 +202,17 @@ void writeWheelDRV(uint8_t en, uint8_t ph, uint8_t slp, bool &asleep, int mode, 
   }
   if (mode == WHEEL_BRAKE) {
     analogWrite(en, 0);  // ตื่นอยู่ + EN = 0 → เบรก (low-side)
+    lastMode = WHEEL_BRAKE;
     return;
   }
-  digitalWrite(ph, mode == WHEEL_FWD ? HIGH : LOW);
+  if (mode != lastMode) {
+    // เปลี่ยน/ตั้งทิศ: ตัด EN ก่อนสลับ PH ทุกครั้ง (แบบต้นฉบับ) กันกระแสกระชาก
+    // ตอนกลับทิศขณะ PWM ยังสูง — ไม่ทำซ้ำทุกรอบ PID เพื่อไม่ให้ duty แกว่ง
+    analogWrite(en, 0);
+    digitalWrite(ph, mode == WHEEL_FWD ? HIGH : LOW);
+  }
   analogWrite(en, pwm);
+  lastMode = mode;
 }
 
 void writeWheelTB(uint8_t pwmPin, uint8_t in1, uint8_t in2, int &lastMode, int mode, int pwm) {
@@ -211,13 +242,13 @@ int invertMode(int mode, bool invert) {
 
 void setWheelL(int mode, int pwm) {
   mode = invertMode(mode, MOTOR_L_INVERT);
-  if (MotorDriverType == MOTOR_DRV8874) writeWheelDRV(DRV_L_EN, DRV_L_PH, DRV_L_SLEEP, drvAsleepL, mode, pwm);
+  if (MotorDriverType == MOTOR_DRV8874) writeWheelDRV(DRV_L_EN, DRV_L_PH, DRV_L_SLEEP, drvAsleepL, drvModeL, mode, pwm);
   else writeWheelTB(TB_L_PWM, TB_L_IN1, TB_L_IN2, tbModeL, mode, pwm);
 }
 
 void setWheelR(int mode, int pwm) {
   mode = invertMode(mode, MOTOR_R_INVERT);
-  if (MotorDriverType == MOTOR_DRV8874) writeWheelDRV(DRV_R_EN, DRV_R_PH, DRV_R_SLEEP, drvAsleepR, mode, pwm);
+  if (MotorDriverType == MOTOR_DRV8874) writeWheelDRV(DRV_R_EN, DRV_R_PH, DRV_R_SLEEP, drvAsleepR, drvModeR, mode, pwm);
   else writeWheelTB(TB_R_PWM, TB_R_IN1, TB_R_IN2, tbModeR, mode, pwm);
 }
 
@@ -248,6 +279,32 @@ void Motor(int left, int right) {
   int modeR = right > 0 ? WHEEL_FWD : (right < 0 ? WHEEL_REV : zeroMode);
   setWheelL(modeL, speedToPwm(left));
   setWheelR(modeR, speedToPwm(right));
+  robotStopped = (left == 0 && right == 0);
+}
+
+// ตั้งเวลา soft-start (ms) ตอนออกตัวด้วยความเร็ว >= 40 จากหยุดนิ่ง | 0 = ปิด
+void set_MotorSoftStart(int ms) {
+  softStartMs = max(ms, 0);
+  if (softStartMs == 0) softStartActive = false;
+}
+
+// เริ่ม soft-start ถ้าหุ่นหยุดนิ่งอยู่และสั่งเร็วพอ (เรียกจาก InitialSpeed)
+void beginSoftStart(int baseSpeed) {
+  softStartBase = abs(baseSpeed);
+  softStartActive = robotStopped && softStartMs > 0 && softStartBase > SOFT_START_MIN_SPEED;
+  softStartBegin = millis();
+}
+
+// ตัวคูณความเร็วช่วงออกตัว: 40/Base → 1.0 แบบ smoothstep ภายใน softStartMs
+float softStartFactor() {
+  if (!softStartActive) return 1.0f;
+  float x = (millis() - softStartBegin) / (float)softStartMs;
+  if (x >= 1.0f) {
+    softStartActive = false;
+    return 1.0f;
+  }
+  float f0 = (float)SOFT_START_MIN_SPEED / softStartBase;
+  return f0 + (1.0f - f0) * (x * x * (3.0f - 2.0f * x));
 }
 
 void Move(int l, int r, int t) {
@@ -259,6 +316,7 @@ void Move(int l, int r, int t) {
 void MotorStop() {
   setWheelL(WHEEL_BRAKE, 0);
   setWheelR(WHEEL_BRAKE, 0);
+  robotStopped = true;
 }
 
 // เบรกค้างไว้ t ms
@@ -271,6 +329,7 @@ void MotorStop(int t) {
 void MotorCoast() {
   setWheelL(WHEEL_COAST, 0);
   setWheelR(WHEEL_COAST, 0);
+  robotStopped = true;
 }
 
 // เบรกช็อตแบบดึงกลับ: สั่งล้อสวนทิศ (l, r) สั้น ๆ t ms แล้วเบรก
@@ -372,6 +431,20 @@ void InitialSpeed() {
   PidFreshF = true;  // รอบแรกของ PIDF / PIDB ไม่ใช้ D (กัน D กระชากตอนออกตัว)
   PidFreshB = true;
   resetGyroRunError();  // previous_errorG / previous_errorGB = error ปัจจุบัน
+  beginSoftStart(BaseSpeed);
+}
+
+// Move แบบมี soft-start (ใช้ใน fd / bk): ไต่ความเร็วตาม softStartFactor() แล้วค้างไว้จนครบ t ms
+void MoveSoft(int l, int r, int t) {
+  unsigned long start = millis();
+  while (softStartActive && millis() - start < (unsigned long)t) {
+    float k = softStartFactor();
+    Motor(lroundf(l * k), lroundf(r * k));
+    delay(1);
+  }
+  unsigned long used = millis() - start;
+  Motor(l, r);
+  if (used < (unsigned long)t) delay(t - used);
 }
 
 // ======================================================================
@@ -381,13 +454,13 @@ void InitialSpeed() {
 void fd(int Speed, int time_ms) {
   BaseSpeed = Speed;
   InitialSpeed();
-  Move(LeftBaseSpeed, RightBaseSpeed, time_ms);
+  MoveSoft(LeftBaseSpeed, RightBaseSpeed, time_ms);
 }
 
 void bk(int Speed, int time_ms) {
   BaseSpeed = Speed;
   InitialSpeed();
-  Move(-BackLeftBaseSpeed, -BackRightBaseSpeed, time_ms);
+  MoveSoft(-BackLeftBaseSpeed, -BackRightBaseSpeed, time_ms);
 }
 
 void sl(int Speed, int time_ms) {

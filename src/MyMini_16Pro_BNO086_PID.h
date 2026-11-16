@@ -447,6 +447,9 @@ static float safeDerivative(float Error, int &LastError, float &FilteredD,
 }
 
 void PIDF(int SpeedL, int SpeedR, float Kp, float Kd) {
+  float ssk = softStartFactor();  // soft-start ตอนออกตัว (1.0 เมื่อพ้นช่วง ramp)
+  SpeedL = lroundf(SpeedL * ssk);
+  SpeedR = lroundf(SpeedR * ssk);
   static bool lastOnline = true;
   float Pos = readPositionF(200, 50);
   float Error = Pos - set_position;
@@ -460,6 +463,9 @@ void PIDF(int SpeedL, int SpeedR, float Kp, float Kd) {
 }
 
 void PIDB(int SpeedL, int SpeedR, float Kp, float Kd) {
+  float ssk = softStartFactor();  // soft-start ตอนออกตัว (1.0 เมื่อพ้นช่วง ramp)
+  SpeedL = lroundf(SpeedL * ssk);
+  SpeedR = lroundf(SpeedR * ssk);
   static bool lastOnline = true;
   float Pos = readPositionB(200, 50);
   float Error = Pos - set_position;
@@ -479,6 +485,9 @@ static bool frontCenterLine() {
 }
 
 void PIDF_none(int SpeedL, int SpeedR, float Kp, float Kd) {
+  float ssk = softStartFactor();  // soft-start ตอนออกตัว (1.0 เมื่อพ้นช่วง ramp)
+  SpeedL = lroundf(SpeedL * ssk);
+  SpeedR = lroundf(SpeedR * ssk);
   ReadCalibrateF();
   float Pos;
   if (frontCenterLine()) {
@@ -507,6 +516,9 @@ static bool backCenterLine() {
 }
 
 void PIDB_none(int SpeedL, int SpeedR, float Kp, float Kd) {
+  float ssk = softStartFactor();  // soft-start ตอนออกตัว (1.0 เมื่อพ้นช่วง ramp)
+  SpeedL = lroundf(SpeedL * ssk);
+  SpeedR = lroundf(SpeedR * ssk);
   float Pos;
   ReadCalibrateB();
   if (backCenterLine()) {
