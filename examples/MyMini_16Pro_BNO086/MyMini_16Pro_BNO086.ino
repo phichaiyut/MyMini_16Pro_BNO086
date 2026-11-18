@@ -19,7 +19,7 @@ void setup() {
   sw();  // รอกดปุ่ม START (ระหว่างรอ Calibrate ได้)
   delay(200);
 
-  SetRobotAngle();
+  // SetRobotAngle();
   // SerialServoControl(); // 18 90 ตั้งค่าเซอร์โวผ่าน serial (ขา 18 / 22 / 28 / 0 / 1)
   Mission();
 

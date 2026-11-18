@@ -32,24 +32,32 @@ void Mission() {
   // LED_KnightRider(1, 40); // ไฟวิ่งบอกจบภารกิจ
 resetAngles();
 // ffdir(60 ,180); 
-// ffcmg(60, 40,0);
-// ffcmg(60, 40,90);
-// ffcmg(60, 40,180);
-// ffcmg(60, 40,270);
+// ffdir(60 ,0); 
+// srg(50,90);
+ffc(10,'s');
+lb(300);
+resetAngles();
+
+ffcmgs(30, 45,45);
+
+ffcmg(50, 40,0);
+
+// ffcmg(60, 60,180);
+// ffcmg(60, 60,270);
 // ffc(50,'q');
 
 // sw();
 
-ffc(50,'e');
-sw();
-ffc(50,'l');
-sw();
-ffc(50,'r');
+// ffc(50,'e');
+// sw();
+// ffc(50,'l');
+// sw();
+// ffc(50,'r');
 
-sw();
-bbc(50,'l');
-sw();
-bbc(50,'r');
+// sw();
+// bbc(50,'l');
+// sw();
+// bbc(50,'r');
 
 
 

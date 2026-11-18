@@ -31,7 +31,7 @@
 //   มุม     ลบ = ซ้าย, บวก = ขวา
 //
 // เซนเซอร์เส้น 16 ตัวต่อแถว F[0..15] / B[0..15] (F: MUX CH0-15, B: กลับลำดับ B_PIN = 15..0)
-//   ชื่อคำสั่ง / ตรรกะจาก MyRP_Pico2_mini_BNO086, ตำแหน่งเซนเซอร์อ้างอิง STORMXII 16CH:
+//   ชื่อคำสั่ง / ตรรกะจาก MyRP_Pico2_mini_BNO086, เซนเซอร์ 16CH:
 //     ตำแหน่งเส้น 0-15000 (เซนเซอร์ละ 1000) กลาง = 7500
 //     ตรวจผ่านแยก / ชิดเส้น = F[3] / F[12]     ขอบนอก (หมุน / บาลานซ์ / ffl / ffr) = F[0] / F[15]
 //
@@ -48,9 +48,9 @@
    ========================================================================== */
 // --- มอเตอร์ ---
 // set_MotorDriver("DRV8874");              // หรือ "TB6612"
-// set_Freq("Coreless_Motors");             // 20 kHz  (หรือ "DC_Motors" 1 kHz)
-// set_MotorInvert(left, right);            // กลับทิศล้อ
-// set_BatteryCompensate(true);             // ชดเชยความเร็วตามแรงดันแบต
+// (ไลบรารีนี้ไม่มี set_Freq / set_MotorInvert / set_BatteryCompensate — PWM ใช้ค่าต้นฉบับ DRV8874 15 kHz / TB6612 20 kHz,
+//  กลับทิศล้อแก้ DRV_L_INVERT / DRV_R_INVERT ใน src/MyMini_16Pro_BNO086_Motor.h,
+//  ไม่มีชดเชยแรงดันแบต แบบต้นฉบับ)
 //
 // --- อ่านเซนเซอร์ / กรองค่า calibrate ---
 // SetSensorRead(settleUs, discard, average);   // ค่าเริ่มต้น (40, 1, 2)
@@ -135,7 +135,7 @@
    [4] เดินตามเส้น เดินหน้า  ff...
    ========================================================================== */
 // ff(speed, 'p');                          // วิ่งจนเจอแยกใดก็ได้ (F3 หรือ F12)
-// ffc(speed, 'p');      ffc2(speed, 'p');  // เจอแยกตัด (เส้นกว้างทั้งสองฝั่ง แบบ STORMXII) | ffc2 = F0+F15 / F2+F13 / F4-F11
+// ffc(speed, 'p');      ffc2(speed, 'p');  // เจอแยกตัด (เส้นกว้างทั้งสองฝั่ง) | ffc2 = F0+F15 / F2+F13 / F4-F11
 // ffl(speed, 'p');                         // เจอแยกซ้าย (F0)
 // ffl2(speed, 'p');                        // เจอแยกซ้ายเต็ม (F0 F2 F4 F6 F9)
 // ffr(speed, 'p');                         // เจอแยกขวา (F15)
@@ -198,15 +198,19 @@
 // fftimercr(speed, ms [, 'p']);     bbtimercr(speed, ms [, 'p']);
 // ffcmcl(speed, cm [, 'p']);        bbcmcl(speed, cm [, 'p']);
 // ffcmcr(speed, cm [, 'p']);        bbcmcr(speed, cm [, 'p']);
-// ffdircl(speed, dir [, 'p']);      bbdircl(speed, dir [, 'p']);     // จนหันถึงทิศ dir (0/90/180/270)
-// ffdircr(speed, dir [, 'p']);      bbdircr(speed, dir [, 'p']);
+// ffdircl(speed, [ 'p', ] dir [, tol]);   bbdircl(speed, [ 'p', ] dir [, tol]);  // จนหันถึงทิศ dir (แบบ MyRP)
+// ffdircr(speed, [ 'p', ] dir [, tol]);   bbdircr(speed, [ 'p', ] dir [, tol]);
+// ffdirclg / ffdircrg / bbdirclg / bbdircrg(speed, 'p', dir [, tol]);         // จบด้วยคำสั่งแยกโหมดไจโร
+// ffdegcl / ffdegcr / bbdegcl / bbdegcr(speed, [ 'p', ] deg [, tol]);         // องศาสัมพัทธ์
+//   (bb...: dir = ทิศที่ถอยไป หัวหุ่นชี้ dir + 180 | tol = องศาที่ถือว่าถึง ค่าเริ่มต้น 4)
 //                                   ( [ ] = ใส่หรือไม่ใส่ก็ได้ )
 //
 // --- กำหนด Kp / Kd เอง (ใส่ต่อจาก speed) ---
 // ffcl(speed, kp, [kd,] 'p');                  bbcl / ffcr / bbcr ใช้แบบเดียวกัน
 // fftimercl(speed, kp, [kd,] ms [, 'p']);      ...timercr / bbtimercl / bbtimercr แบบเดียวกัน
 // ffcmcl(speed, kp, [kd,] cm [, 'p']);         ...cmcr / bbcmcl / bbcmcr แบบเดียวกัน (cm เป็นจำนวนเต็ม)
-// ffdircl(speed, kp, [kd,] dir [, 'p']);       ...dircr / bbdircl / bbdircr แบบเดียวกัน (kp ต้องมีจุดทศนิยม เช่น 0.02)
+// ffdircl(speed, kp, [kd,] 'p', dir [, tol]);  ...dircr / bbdircl / bbdircr / ...g / ffdegcl ... แบบเดียวกัน (MyRP)
+//
 
 
 /* ==========================================================================
@@ -262,17 +266,21 @@
 // turndegreeb_none([speed,] 90);
 // rotatedegree(L, R, 90);            rotatedegree(L, R, 90, kp, kd);   // โค้งกว้าง กำหนดล้อเอง
 //
-// --- หันไปทิศสัมบูรณ์ (0 / 90 / 180 / 270) ---
-// spindirection([speed,] dir);
-// turndirection([speed,] dir);
-// turndirectionb([speed,] dir);
-// turndirection_none([speed,] dir);
-// turndirectionb_none([speed,] dir);
+// --- หันไปทิศสัมบูรณ์ (0 / 90 / 180 / 270) — ทิศ = ทิศที่หัวหุ่นจะหันไป ---
+// spindir([speed,] dir);        sdg       (= spindirection)
+// turndir([speed,] dir);        tdg       (= turndirection)
+// turndirb([speed,] dir);       tdbg      (= turndirectionb)
+// turndir_none([speed,] dir);   turndirb_none([speed,] dir);
+// rotatedir(L, R, dir);   rotatedir_none(L, R, dir);   rotatedir(L, R, 'p', dir);
+// resetAnglesDir(DIR_E);  setHeading(dir);  set_auto_align(20);   // DIR_N / DIR_E / DIR_S / DIR_W ...
 //
-// --- วิ่งตามเส้นจนหันถึงทิศ (ใช้กับเส้นโค้ง) ---
-// ffdir(speed, dir [, 'p']);             bbdir(speed, dir [, 'p']);             // เช่น ffdir(50, 270);
-// ffdir(speed, kp, [kd,] dir [, 'p']);   bbdir(speed, kp, [kd,] dir [, 'p']);   // กำหนด Kp / Kd เอง (kp ต้องมีจุดทศนิยม)
-// set_line_dir_threshold(5.0);           // ระยะยอมรับ (องศา) ค่าเริ่มต้น 5
+// --- วิ่งตามเส้นจนหันถึงทิศ (ใช้กับเส้นโค้ง) — แบบ MyRP_Pico2 ---
+// ffdir(speed, [ 'p', ] dir [, tol]);    bbdir(speed, [ 'p', ] dir [, tol]);    // เช่น ffdir(50, 270);
+// ffdirg(speed, 'p', dir [, tol]);       bbdirg(speed, 'p', dir [, tol]);       // จบด้วยคำสั่งแยกโหมดไจโร
+// ffdeg(speed, [ 'p', ] deg [, tol]);    bbdeg(...);   // องศาสัมพัทธ์
+//   (bb...: dir = ทิศที่ถอยไป หัวหุ่นชี้ dir + 180 | 'f' = หยุดด้วยเบรกไจโร | 'n' = ไหลต่อ)
+// set_line_dir_brake(spd, ms [, hold]);  set_gyro_dir_timeout(ms);
+//
 //
 // --- ชื่อย่อ (ใส่มุมเป็นบวกเสมอ) ---
 //   ซ้าย                ขวา                 ย่อ
@@ -290,10 +298,13 @@
    ========================================================================== */
 //   เดินหน้า                              ถอยหลัง
 // fftimerg(speed, ms [, 'p'] [, dir]);   bbtimerg(speed, ms [, 'p'] [, dir]);   // ตามเวลา
-// fftg(speed, ms, 'p' [, dir]);          bbtg(speed, ms, 'p' [, dir]);          // ชื่อย่อ
+// fftg(speed, ms, [ 'p', ] dir);         bbtg(speed, ms, [ 'p', ] dir);         // ชื่อย่อ
 // ffcmg(speed, cm [, 'p'] [, dir]);      bbcmg(speed, cm [, 'p'] [, dir]);      // ตามระยะ (เร่ง/ผ่อน)
 // ffcmgs(speed, cm [, 'p'] [, dir]);     bbcmgs(speed, cm [, 'p'] [, dir]);     // ตามระยะ (ความเร็วคงที่)
 // ffbg(speed, 'p' [, dir]);              bbbg(speed, 'p' [, dir]);              // วิ่งจนเจอเส้น
+// spin_ffcmg / turn_ffcmg / turnb_ffcmg(speed, cm, [ 'p', ] dir);   spin_bbcmg / turn_bbcmg / turnb_bbcmg(...)
+//   (bb...: dir = ทิศที่ถอยไป หัวหุ่นชี้ dir + 180 แบบ MyRP)
+//
 // ffdg(speed, 'p', dist);                bbdg(speed, 'p', dist);                // จนเซนเซอร์วัดระยะถึง dist
 // ffdgs(speed, 'p', dist);               bbdgs(speed, 'p', dist);               // แบบค่อย ๆ ชะลอ
 // ToCenterG();                           BackCenterG();                         // เข้ากลางด้วย gyro
@@ -359,10 +370,10 @@
 // readDistance();                                               // เซนเซอร์วัดระยะ 0-4095
 //
 // --- Calibrate ---
-// calibrateF();        calibrateB();        calibrateC();       // เก็บค่าแล้วบันทึกให้อัตโนมัติ
-// saveCalibration();                        // EEPROM ภายนอก (ตรวจอ่านกลับ) + สำรอง flash
-// loadCalibration();                        // โหลด EEPROM ถ้าไม่ได้ใช้ flash
-// loadCalibration_LOCAL();   saveCalibration_LOCAL();   printCalibration();
+// Calibrate ทำผ่านปุ่มในเมนู sw() (โค้ดต้นฉบับ MyMINI_16Pro, เก็บค่า 5 วินาที):
+//   ปุ่ม Cal หน้า (GP3) = F | ปุ่ม ADCcal = B | กด START ค้าง 3 วิ = C | กด START สั้น = ออกตัว
+// saveCalibration();                        // EEPROM ภายนอก (ตรวจอ่านกลับ)
+// loadCalibration();   printCalibration();  // โหลด EEPROM / แสดงค่า
 // รูปแบบข้อมูลเหมือน MyMINI_16Pro → ค่าที่เคย Calibrate ไว้โหลดได้เลย
 
 

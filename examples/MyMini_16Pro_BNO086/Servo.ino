@@ -3,6 +3,7 @@
 int servo_down = 40;    //-------------------->> ตั้งค่า มือจับลงขนานกับพื้น
 int servoL_open = 160;  //-------------------->> ตั้งค่า กางฝ่ามือด้านซ้าย
 int servoR_open = 160;  //-------------------->> ตั้งค่า กางฝ่ามือด้านขวา
+int hand_spd = 2;       //-------------------->> ความเร็วมือซ้าย-ขวา (ms ต่อสเต็ป) ให้อ้า/หุบพร้อมกัน, 0 = สั่งทันทีแบบเดิม
 //----------------------------------------------------------------------------->> ตั้งค่ามือจับ
 
 int readyL = 60, readyR = 60;          // ฟังก์ชันองศาของ arm_ready()  //--------->> แขนลง กางฝ่ามือออกเตรียมเข้าไปคีบ
@@ -15,12 +16,12 @@ int up45 = 45;
 void arm_ready() {  //--------->> แขนลง กางฝ่ามือออกเตรียมเข้าไปคีบ
   MotorStop();
   armupdown(servo_down);
-  arm_left_right(servoL_open - readyL, servoR_open - readyR);
+  arm_left_right(servoL_open - readyL, servoR_open - readyR, hand_spd);
 }
 
 void arm_open_down() {  //--------->>  กางฝ่ามือออก  และเอาแขนลง
   MotorStop();
-  arm_left_right(servoL_open, servoR_open);
+  arm_left_right(servoL_open, servoR_open, hand_spd);
   delay(200);
   armupdown(servo_down);
   delay(50);
@@ -30,13 +31,13 @@ void arm_down_open() {  //--------->>  เอาแขนลง  และ ก�
   MotorStop();
   armupdown(servo_down);
   delay(200);
-  arm_left_right(servoL_open, servoR_open);
+  arm_left_right(servoL_open, servoR_open, hand_spd);
   delay(50);
 }
 
 void arm_open_up() {  //--------->>  กางฝ่ามือออก  และยกแขนขึ้น
   MotorStop();
-  arm_left_right(servoL_open, servoR_open);
+  arm_left_right(servoL_open, servoR_open, hand_spd);
   delay(200);
   armupdown(servo_down + up);
   delay(50);
@@ -46,7 +47,7 @@ void arm_up_open() {  //--------->>  เอาแขนขึ้น  และ �
   MotorStop();
   armupdown(servo_down + up);
   delay(200);
-  arm_left_right(servoL_open, servoR_open);
+  arm_left_right(servoL_open, servoR_open, hand_spd);
   delay(50);
 }
 
@@ -54,13 +55,13 @@ void arm_down_close() {  //--------->>  เอาแขนลง  และ ห�
   MotorStop();
   armupdown(servo_down);
   delay(200);
-  arm_left_right(servoL_open - closeL, servoR_open - closeR);
+  arm_left_right(servoL_open - closeL, servoR_open - closeR, hand_spd);
   delay(50);
 }
 
 void arm_close_down() {  //--------->>  หุบมือเข้า  และ เอาแขนลง
   MotorStop();
-  arm_left_right(servoL_open - closeL, servoR_open - closeR);
+  arm_left_right(servoL_open - closeL, servoR_open - closeR, hand_spd);
   delay(200);
   armupdown(servo_down);
   delay(50);
@@ -70,13 +71,13 @@ void arm_up_close() {  //--------->>  ยกแขนขึ้น  และ ห
   MotorStop();
   armupdown(servo_down + up);
   delay(100);
-  arm_left_right(servoL_open - closeL, servoR_open - closeR);
+  arm_left_right(servoL_open - closeL, servoR_open - closeR, hand_spd);
   delay(50);
 }
 
 void arm_close_up() {  //--------->>  หุบมือเข้า  และ ยกแขนขึ้น
   MotorStop();
-  arm_left_right(servoL_open - closeL, servoR_open - closeR);
+  arm_left_right(servoL_open - closeL, servoR_open - closeR, hand_spd);
   delay(200);
   armupdown(servo_down + up);
   delay(100);
@@ -85,13 +86,13 @@ void arm_close_up() {  //--------->>  หุบมือเข้า  และ 
 void arm_big_box() {  //--------->>  คีบกล่องใหญ่
   MotorStop();
   armupdown(servo_down);
-  arm_left_right(servoL_open - closeBigL, servoR_open - closeBigR);
+  arm_left_right(servoL_open - closeBigL, servoR_open - closeBigR, hand_spd);
   delay(100);
 }
 
 void arm_big_box_up() {  //--------->>  คีบกล่องใหญ่ แล้วยกขึ้น
   MotorStop();
-  arm_left_right(servoL_open - closeBigL, servoR_open - closeBigR);
+  arm_left_right(servoL_open - closeBigL, servoR_open - closeBigR, hand_spd);
   delay(200);
   armupdown(servo_down + up);
   delay(100);
@@ -99,7 +100,7 @@ void arm_big_box_up() {  //--------->>  คีบกล่องใหญ่ แ
 
 void arm_behihd() {
   MotorStop();
-  arm_left_right(servoL_open + behindL, servoR_open + behindR);
+  arm_left_right(servoL_open + behindL, servoR_open + behindR, hand_spd);
 }
 
 void arm_up() {
@@ -122,31 +123,31 @@ void arm_down() {
 
 void arm_open() {
   MotorStop();
-  arm_left_right(servoL_open, servoR_open);
+  arm_left_right(servoL_open, servoR_open, hand_spd);
   delay(100);
 }
 
 void arm_close() {
   MotorStop();
-  arm_left_right(servoL_open - closeL, servoR_open - closeR);
+  arm_left_right(servoL_open - closeL, servoR_open - closeR, hand_spd);
   delay(100);
 }
 
 void arm_big() {
   MotorStop();
-  arm_left_right(servoL_open - closeBigL, servoR_open - closeBigR);
+  arm_left_right(servoL_open - closeBigL, servoR_open - closeBigR, hand_spd);
   delay(100);
 }
 
 void arm_open_l() {
   MotorStop();
-  arm_left_right(servoL_open, servoR_open - closeR);
+  arm_left_right(servoL_open, servoR_open - closeR, hand_spd);
   delay(100);
 }
 
 void arm_open_r() {
   MotorStop();
-  arm_left_right(servoL_open - closeL, servoR_open);
+  arm_left_right(servoL_open - closeL, servoR_open, hand_spd);
   delay(100);
 }
 

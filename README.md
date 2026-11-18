@@ -22,19 +22,22 @@ MyMini_16Pro_BNO086/
 ├── library.properties
 ├── keywords.txt
 ├── src/
-│   ├── MyMini_16Pro_BNO086.h          ไฟล์หลัก: RobotSetup() + เมนูปุ่ม sw()
-│   ├── MyMini_16Pro_BNO086_Battery.h  วัดแรงดันแบตเตอรี่
-│   ├── MyMini_16Pro_BNO086_Buzzer.h   เสียง
-│   ├── MyMini_16Pro_BNO086_Gyro.h     BNO086: เลี้ยว / หมุน / วิ่งตรงด้วยไจโร
-│   ├── MyMini_16Pro_BNO086_I2C.h      I2C, EEPROM, ADS1115
-│   ├── MyMini_16Pro_BNO086_LED.h      ไฟ LED (PCF8574)
-│   ├── MyMini_16Pro_BNO086_Motor.h    มอเตอร์
+│   ├── MyMini_16Pro_BNO086.h          ไฟล์หลัก: RobotSetup() + GyroReset() + เมนูปุ่ม sw() / swOK()
+│   ├── MyMini_16Pro_BNO086_Decl.h     ประกาศล่วงหน้าฟังก์ชันที่เรียกข้ามไฟล์
+│   ├── MyMini_16Pro_BNO086_Battery.h  วัดแรงดันแบต + ไฟระดับแบต / เสียงเตือน
+│   ├── MyMini_16Pro_BNO086_Button.h   ปุ่ม START / Calibrate / ADCcal
+│   ├── MyMini_16Pro_BNO086_Buzzer.h   เสียง (tone() บน GP9)
+│   ├── MyMini_16Pro_BNO086_Gyro.h     BNO086: เลี้ยว / หมุน / วิ่งตรง / ทิศสัมบูรณ์ด้วยไจโร
+│   ├── MyMini_16Pro_BNO086_I2C.h      I2C, EEPROM CAT24C128, ADS1115, MCP3421, LED PCF8574
+│   ├── MyMini_16Pro_BNO086_Motor.h    มอเตอร์ DRV8874 / TB6612 (ทิศล้อ: DRV_L_INVERT / DRV_R_INVERT)
 │   ├── MyMini_16Pro_BNO086_PID.h      เดินตามเส้น PID + คำสั่งเจอแยก
-│   ├── MyMini_16Pro_BNO086_Sensor.h   อ่าน / คาลิเบรตเซนเซอร์เส้น
-│   └── MyMini_16Pro_BNO086_Servo.h    เซอร์โว
+│   ├── MyMini_16Pro_BNO086_Sensor.h   อ่าน / คาลิเบรตเซนเซอร์เส้น (MUX 16+16)
+│   ├── MyMini_16Pro_BNO086_Servo.h    เซอร์โว GP18 / GP22 / GP28 / GP0 / GP1
+│   └── MyMini_16Pro_BNO086_my_MCP3008s.*  ไดรเวอร์ MCP3008 (ใช้เมื่อต่อโมดูลเพิ่ม)
 └── examples/
     ├── MyMini_16Pro_BNO086/           โปรแกรมหลัก (Setting / Mission / Servo / Manual)
-    └── GyroTest/                      ทดสอบทิศมุมและการเลี้ยวของ BNO086
+    ├── GyroTest/                      ทดสอบทิศมุมและการเลี้ยวของ BNO086
+    └── MotorTest/                     ทดสอบมอเตอร์ทีละล้อ
 ```
 
 ## เริ่มใช้งาน
@@ -43,7 +46,7 @@ MyMini_16Pro_BNO086/
 
 | แท็บ | ใช้ทำอะไร |
 |------|-----------|
-| `Setting.ino` | ตั้งค่าหุ่น: ความเร็ว, Kp/Kd (`PID_PROFILE`), ไจโร |
+| `Setting.ino` | ตั้งค่าหุ่น: ความเร็ว, Kp/Kd ต่อความเร็ว (`SetKpKd()` / `SetKpKdBack()`), ไจโร |
 | `Mission.ino` | เขียนภารกิจ (ลำดับคำสั่งเดิน) |
 | `Servo.ino`   | ท่าทางแขน เช่น `arm_up_open()` |
 | `Manual.ino`  | คู่มือคำสั่งทั้งหมด |
@@ -52,10 +55,10 @@ MyMini_16Pro_BNO086/
 #include <MyMini_16Pro_BNO086.h>
 
 void setup() {
-  RobotSetup();
+  RobotSetup();    // ตั้งศูนย์ไจโร 0 องศาตอนเปิดเครื่อง (หุ่นต้องนิ่ง)
   Setting();
-  sw();            // รอกดปุ่ม START (ระหว่างรอคาลิเบรตได้)
-  SetRobotAngle();
+  sw();            // รอกดปุ่ม START (ระหว่างรอคาลิเบรตได้) — ไม่ตั้งศูนย์ไจโรซ้ำ
+  // SetRobotAngle(); / resetAngles();  // ใส่เองถ้าต้องการให้มุม 0 = ทิศตอนกด START
   Mission();
   MotorStop();
 }
@@ -80,7 +83,7 @@ void loop() {}
 
 ## ตรวจสอบหุ่น
 
-- `TestMotorDirection()`: ล้อซ้ายต้องหมุนไปข้างหน้าก่อน
+- `TestMotorDirection()`: ล้อซ้ายต้องหมุนไปข้างหน้าก่อน (ถ้าผิดแก้ `DRV_L_INVERT` / `DRV_R_INVERT` ใน `src/MyMini_16Pro_BNO086_Motor.h`)
 - `SerialPositionF()`: เส้นอยู่ทางซ้ายต้องอ่านได้ต่ำกว่า 7500
 - `SerialLoopTimeF()`: ดูเวลาต่อรอบของลูป PID
 - ตัวอย่าง `GyroTest`: ตรวจทิศมุม ถ้ามุมกลับทิศให้ใส่ `#define MYMINI_YAW_SIGN 1` ไว้บนสุดของ sketch ก่อน `#include`

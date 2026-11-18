@@ -220,7 +220,7 @@ void test4() {
     Serial.printf("=> ผ่าน: คลาดเคลื่อน %.1f° (ถ้าเกินเป้าเยอะ ปรับ SetGyroSpin / set_brake_spin_gyro)\n", turned - 90);
   } else if (turned < -30) {
     if (signResult == 1) {
-      Serial.println("=> ไจโรทิศถูก (ทดสอบ 2 ผ่าน) แต่หุ่นหมุนผิดทาง: ทิศมอเตอร์กลับ → แก้ set_MotorInvert()");
+      Serial.println("=> ไจโรทิศถูก (ทดสอบ 2 ผ่าน) แต่หุ่นหมุนผิดทาง: ทิศมอเตอร์กลับ → แก้ DRV_L_INVERT / DRV_R_INVERT ใน src/MyMini_16Pro_BNO086_Motor.h");
     } else {
       Serial.println("=> หุ่นหมุนผิดทาง: ทำทดสอบ 2 ก่อนเพื่อแยกว่าเป็นทิศไจโร หรือทิศมอเตอร์");
     }
@@ -246,9 +246,6 @@ void setup() {
 
   // ตั้งค่ามอเตอร์ให้ตรงกับ Setting() ของ sketch หลัก (แก้ให้ตรงถ้าเปลี่ยนไว้)
   set_MotorDriver("DRV8874");
-  set_Freq("Coreless_Motors");
-  set_MotorInvert(false, false);
-  set_BatteryCompensate(true);
   // ค่าหมุนตัวเดียวกับ Setting() ของ sketch หลัก
   SetGyroSpin(1.2, 0.25, 50, 8, 25.0, 1.0);
   set_brake_spin_gyro_setg(5);
